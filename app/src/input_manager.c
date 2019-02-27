@@ -1,7 +1,8 @@
-#include "inputmanager.h"
+#include "input_manager.h"
 
+#include <SDL2/SDL_assert.h>
 #include "convert.h"
-#include "lockutil.h"
+#include "lock_util.h"
 #include "log.h"
 
 // Convert window coordinates (as provided by SDL_GetMouseState() to renderer coordinates (as provided in SDL mouse events)
@@ -22,10 +23,9 @@ static struct point get_mouse_point(struct screen *screen) {
     int y;
     SDL_GetMouseState(&x, &y);
     convert_to_renderer_coordinates(screen->renderer, &x, &y);
-    SDL_assert_release(x >= 0 && x < 0x10000 && y >= 0 && y < 0x10000);
     return (struct point) {
-        .x = (Uint16) x,
-        .y = (Uint16) y,
+        .x = x,
+        .y = y,
     };
 }
 
@@ -129,6 +129,12 @@ static void clipboard_paste(struct controller *controller) {
 
 void input_manager_process_text_input(struct input_manager *input_manager,
                                       const SDL_TextInputEvent *event) {
+    char c = event->text[0];
+    if (isalpha(c) || c == ' ') {
+        SDL_assert(event->text[1] == '\0');
+        // letters and space are handled as raw key event
+        return;
+    }
     struct control_event control_event;
     control_event.type = CONTROL_EVENT_TYPE_TEXT;
     control_event.text_event.text = SDL_strdup(event->text);
@@ -137,6 +143,7 @@ void input_manager_process_text_input(struct input_manager *input_manager,
         return;
     }
     if (!controller_push_event(input_manager->controller, &control_event)) {
+        SDL_free(control_event.text_event.text);
         LOGW("Cannot send text event");
     }
 }
@@ -144,9 +151,17 @@ void input_manager_process_text_input(struct input_manager *input_manager,
 void input_manager_process_key(struct input_manager *input_manager,
                                const SDL_KeyboardEvent *event) {
     SDL_bool ctrl = event->keysym.mod & (KMOD_LCTRL | KMOD_RCTRL);
+    SDL_bool alt = event->keysym.mod & (KMOD_LALT | KMOD_RALT);
+    SDL_bool meta = event->keysym.mod & (KMOD_LGUI | KMOD_RGUI);
+
+    if (alt) {
+        // no shortcut involves Alt or Meta, and they should not be forwarded
+        // to the device
+        return;
+    }
 
     // capture all Ctrl events
-    if (ctrl) {
+    if (ctrl | meta) {
         SDL_bool shift = event->keysym.mod & (KMOD_LSHIFT | KMOD_RSHIFT);
         if (shift) {
             // currently, there is no shortcut involving SHIFT
@@ -158,61 +173,73 @@ void input_manager_process_key(struct input_manager *input_manager,
         SDL_bool repeat = event->repeat;
         switch (keycode) {
             case SDLK_h:
-                if (!repeat) {
+                if (ctrl && !meta && !repeat) {
                     action_home(input_manager->controller, action);
                 }
                 return;
             case SDLK_b: // fall-through
             case SDLK_BACKSPACE:
-                if (!repeat) {
+                if (ctrl && !meta && !repeat) {
                     action_back(input_manager->controller, action);
                 }
                 return;
             case SDLK_s:
-                if (!repeat) {
+                if (ctrl && !meta && !repeat) {
                     action_app_switch(input_manager->controller, action);
                 }
                 return;
             case SDLK_m:
-                if (!repeat) {
+                if (ctrl && !meta && !repeat) {
                     action_menu(input_manager->controller, action);
                 }
                 return;
             case SDLK_p:
-                if (!repeat) {
+                if (ctrl && !meta && !repeat) {
                     action_power(input_manager->controller, action);
                 }
                 return;
             case SDLK_DOWN:
-                // forward repeated events
-                action_volume_down(input_manager->controller, action);
+#ifdef __APPLE__
+                if (!ctrl && meta) {
+#else
+                if (ctrl && !meta) {
+#endif
+                    // forward repeated events
+                    action_volume_down(input_manager->controller, action);
+                }
                 return;
             case SDLK_UP:
-                // forward repeated events
-                action_volume_up(input_manager->controller, action);
+#ifdef __APPLE__
+                if (!ctrl && meta) {
+#else
+                if (ctrl && !meta) {
+#endif
+                    // forward repeated events
+                    action_volume_up(input_manager->controller, action);
+                }
                 return;
             case SDLK_v:
-                if (!repeat && event->type == SDL_KEYDOWN) {
+                if (ctrl && !meta && !repeat && event->type == SDL_KEYDOWN) {
                     clipboard_paste(input_manager->controller);
                 }
                 return;
             case SDLK_f:
-                if (!repeat && event->type == SDL_KEYDOWN) {
+                if (ctrl && !meta && !repeat && event->type == SDL_KEYDOWN) {
                     screen_switch_fullscreen(input_manager->screen);
                 }
                 return;
             case SDLK_x:
-                if (!repeat && event->type == SDL_KEYDOWN) {
+                if (ctrl && !meta && !repeat && event->type == SDL_KEYDOWN) {
                     screen_resize_to_fit(input_manager->screen);
                 }
                 return;
             case SDLK_g:
-                if (!repeat && event->type == SDL_KEYDOWN) {
+                if (ctrl && !meta && !repeat && event->type == SDL_KEYDOWN) {
                     screen_resize_to_pixel_perfect(input_manager->screen);
                 }
                 return;
             case SDLK_i:
-                if (!repeat && event->type == SDL_KEYDOWN) {
+                if (ctrl && !meta && !repeat && event->type == SDL_KEYDOWN) {
                     switch_fps_counter_state(input_manager->frames);
                 }
                 return;
@@ -243,6 +270,13 @@ void input_manager_process_mouse_motion(struct input_manager *input_manager,
     }
 }
 
+static SDL_bool is_outside_device_screen(struct input_manager *input_manager,
+                                         int x, int y)
+{
+    return x < 0 || x >= input_manager->screen->frame_size.width ||
+           y < 0 || y >= input_manager->screen->frame_size.height;
+}
+
 void input_manager_process_mouse_button(struct input_manager *input_manager,
                                         const SDL_MouseButtonEvent *event) {
     if (event->type == SDL_MOUSEBUTTONDOWN) {
@@ -256,16 +290,17 @@ void input_manager_process_mouse_button(struct input_manager *input_manager,
         }
         // double-click on black borders resize to fit the device screen
         if (event->button == SDL_BUTTON_LEFT && event->clicks == 2) {
-            SDL_bool outside_device_screen =
-                    event->x < 0 || event->x >= input_manager->screen->frame_size.width ||
-                    event->y < 0 || event->y >= input_manager->screen->frame_size.height;
-            if (outside_device_screen) {
+            SDL_bool outside= is_outside_device_screen(input_manager,
+                                                       event->x,
+                                                       event->y);
+            if (outside) {
                 screen_resize_to_fit(input_manager->screen);
                 return;
             }
-            // otherwise, send the click event to the device
         }
+        // otherwise, send the click event to the device
     }
+
     struct control_event control_event;
     if (mouse_button_from_sdl_to_android(event, input_manager->screen->frame_size, &control_event)) {
         if (!controller_push_event(input_manager->controller, &control_event)) {

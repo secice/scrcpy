@@ -1,4 +1,4 @@
-# scrcpy (v1.3)
+# scrcpy (v1.7)
 
 This application provides display and control of Android devices connected on
 USB (or [over TCP/IP][article-tcpip]). It does not require any _root_ access.
@@ -14,6 +14,11 @@ The Android part requires at least API 21 (Android 5.0).
 Make sure you [enabled adb debugging][enable-adb] on your device(s).
 
 [enable-adb]: https://developer.android.com/studio/command-line/adb.html#Enabling
+
+On some devices, you also need to enable [an additional option][control] to
+control it using keyboard and mouse.
+
+[control]: https://github.com/Genymobile/scrcpy/issues/70#issuecomment-373286323
 
 
 ## Get the app
@@ -31,19 +36,24 @@ For Arch Linux, two [AUR] packages have been created by users:
 
 [AUR]: https://wiki.archlinux.org/index.php/Arch_User_Repository
 
+For Gentoo, an [Ebuild] is available: [`scrcpy/`][ebuild-link].
+
+[Ebuild]: https://wiki.gentoo.org/wiki/Ebuild
+[ebuild-link]: https://github.com/maggu2810/maggu2810-overlay/tree/master/app-mobilephone/scrcpy
+
 
 ### Windows
 
 For Windows, for simplicity, prebuilt archives with all the dependencies
 (including `adb`) are available:
 
- - [`scrcpy-win32-v1.3.zip`][direct-win32].  
-   _(SHA-256: 51a2990e631ed469a7a86ff38107d517a91d313fb3f8327eb7bc71dde40870b5)_
- - [`scrcpy-win64-v1.3.zip`][direct-win64].  
-   _(SHA-256: 0768a80d3d600d0bbcd220ca150ae88a3a58d1fe85c308a8c61f44480b711e43)_
+ - [`scrcpy-win32-v1.7.zip`][direct-win32]  
+   _(SHA-256: 98ae36f2da0b8212c07066fd93139650554274f863d4cee0781501a0c84f7c23)_
+ - [`scrcpy-win64-v1.7.zip`][direct-win64]  
+   _(SHA-256: b41416547521062f19e3f3f539e89a70e713bd086e69ef1b29c128993f7aa462)_
 
-[direct-win32]: https://github.com/Genymobile/scrcpy/releases/download/v1.3/scrcpy-win32-v1.3.zip
-[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.3/scrcpy-win64-v1.3.zip
+[direct-win32]: https://github.com/Genymobile/scrcpy/releases/download/v1.7/scrcpy-win32-v1.7.zip
+[direct-win64]: https://github.com/Genymobile/scrcpy/releases/download/v1.7/scrcpy-win64-v1.7.zip
 
 You can also [build the app manually][BUILD].
 
@@ -81,36 +91,166 @@ It accepts command-line arguments, listed by:
 scrcpy --help
 ```
 
-For example, to decrease video bitrate to 2Mbps (default is 8Mbps):
+## Features
+
+
+### Reduce size
+
+Sometimes, it is useful to mirror an Android device at a lower definition to
+increase performances.
+
+To limit both width and height to some value (e.g. 1024):
 
 ```bash
-scrcpy -b 2M
+scrcpy --max-size 1024
+scrcpy -m 1024  # short version
 ```
 
-To limit the video dimensions (e.g. if the device is 2540×1440, but the host
-screen is smaller, or cannot decode such a high definition):
+The other dimension is computed to that the device aspect-ratio is preserved.
+That way, a device in 1920×1080 will be mirrored at 1024×576.
+
+
+### Change bit-rate
+
+The default bit-rate is 8Mbps. To change the video bitrate (e.g. to 2Mbps):
 
 ```bash
-scrcpy -m 1024
+scrcpy --bit-rate 2M
+scrcpy -b 2M  # short version
 ```
 
-The device screen may be cropped to mirror only part of the screen:
+
+### Crop
+
+The device screen may be cropped to mirror only part of the screen.
+
+This is useful for example to mirror only 1 eye of the Oculus Go:
 
 ```bash
-scrcpy -c 1224:1440:0:0   # 1224x1440 at offset (0,0)
+scrcpy --crop 1224:1440:0:0   # 1224x1440 at offset (0,0)
+scrcpy -c 1224:1440:0:0       # short version
 ```
+
+If `--max-size` is also specified, resizing is applied after cropping.
+
+
+### Wireless
+
+_Scrcpy_ uses `adb` to communicate with the device, and `adb` can [connect] to a
+device over TCP/IP:
+
+1. Connect the device to the same Wi-Fi as your computer.
+2. Get your device IP address (in Settings → About phone → Status).
+3. Enable adb over TCP/IP on your device: `adb tcpip 5555`.
+4. Unplug your device.
+5. Connect to your device: `adb connect DEVICE_IP:5555` _(replace `DEVICE_IP`)_.
+6. Run `scrcpy` as usual.
+
+It may be useful to decrease the bit-rate and the definition:
+
+```bash
+scrcpy --bit-rate 2M --max-size 800
+scrcpy -b2M -m800  # short version
+```
+
+[connect]: https://developer.android.com/studio/command-line/adb.html#wireless
+
+
+### Record screen
+
+It is possible to record the screen while mirroring:
+
+```bash
+scrcpy --record file.mp4
+scrcpy -r file.mkv
+```
+
+"Skipped frames" are recorded, even if they are not displayed in real time (for
+performance reasons). Frames are _timestamped_ on the device, so [packet delay
+variation] does not impact the recorded file.
+
+[packet delay variation]: https://en.wikipedia.org/wiki/Packet_delay_variation
+
+
+### Multi-devices
 
 If several devices are listed in `adb devices`, you must specify the _serial_:
 
 ```bash
-scrcpy -s 0123456789abcdef
+scrcpy --serial 0123456789abcdef
+scrcpy -s 0123456789abcdef  # short version
 ```
 
-To show physical touches while scrcpy is running:
+You can start several instances of _scrcpy_ for several devices.
+
+
+### Fullscreen
+
+The app may be started directly in fullscreen:
 
 ```bash
+scrcpy --fullscreen
+scrcpy -f  # short version
+```
+
+Fullscreen can then be toggled dynamically with `Ctrl`+`f`.
+
+
+### Always on top
+
+The window of app can always be above others by:
+
+```bash
+scrcpy --always-on-top
+scrcpy -T  # short version
+```
+
+
+### Show touches
+
+For presentations, it may be useful to show physical touches (on the physical
+device).
+
+Android provides this feature in _Developers options_.
+
+_Scrcpy_ provides an option to enable this feature on start and disable on exit:
+
+```bash
+scrcpy --show-touches
 scrcpy -t
 ```
+
+Note that it only shows _physical_ touches (with the finger on the device).
+
+
+### Install APK
+
+To install an APK, drag & drop an APK file (ending with `.apk`) to the _scrcpy_
+window.
+
+There is no visual feedback, a log is printed to the console.
+
+
+### Push file to device
+
+To push a file to `/sdcard/` on the device, drag & drop a (non-APK) file to the
+_scrcpy_ window.
+
+There is no visual feedback, a log is printed to the console.
+
+
+### Forward audio
+
+Audio is not forwarded by _scrcpy_.
+
+There is a limited solution using [AOA], implemented in the [`audio`] branch. If
+you are interested, see [issue 14].
+
+
+[AOA]: https://source.android.com/devices/accessories/aoa2
+[`audio`]: https://github.com/Genymobile/scrcpy/commits/audio
+[issue 14]: https://github.com/Genymobile/scrcpy/issues/14
+
 
 ## Shortcuts
 
@@ -123,13 +263,12 @@ scrcpy -t
  | click on `BACK`                        | `Ctrl`+`b` \| _Right-click²_  |
  | click on `APP_SWITCH`                  | `Ctrl`+`s`                    |
  | click on `MENU`                        | `Ctrl`+`m`                    |
- | click on `VOLUME_UP`                   | `Ctrl`+`↑` _(up)_             |
- | click on `VOLUME_DOWN`                 | `Ctrl`+`↓` _(down)_           |
+ | click on `VOLUME_UP`                   | `Ctrl`+`↑` _(up)_   (`Cmd`+`↑` on MacOS) |
+ | click on `VOLUME_DOWN`                 | `Ctrl`+`↓` _(down)_ (`Cmd`+`↓` on MacOS) |
  | click on `POWER`                       | `Ctrl`+`p`                    |
  | turn screen on                         | _Right-click²_                |
  | paste computer clipboard to device     | `Ctrl`+`v`                    |
  | enable/disable FPS counter (on stdout) | `Ctrl`+`i`                    |
- | install APK from computer              | drag & drop APK file          |
 
 _¹Double-click on black borders to remove them._  
 _²Right-click turns the screen on if it was off, presses BACK otherwise._

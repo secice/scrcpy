@@ -9,8 +9,8 @@ import java.nio.charset.StandardCharsets;
 public class ControlEventReader {
 
     private static final int KEYCODE_PAYLOAD_LENGTH = 9;
-    private static final int MOUSE_PAYLOAD_LENGTH = 13;
-    private static final int SCROLL_PAYLOAD_LENGTH = 16;
+    private static final int MOUSE_PAYLOAD_LENGTH = 17;
+    private static final int SCROLL_PAYLOAD_LENGTH = 20;
     private static final int COMMAND_PAYLOAD_LENGTH = 1;
 
     public static final int TEXT_MAX_LENGTH = 300;
@@ -132,8 +132,8 @@ public class ControlEventReader {
     }
 
     private static Position readPosition(ByteBuffer buffer) {
-        int x = toUnsigned(buffer.getShort());
-        int y = toUnsigned(buffer.getShort());
+        int x = buffer.getInt();
+        int y = buffer.getInt();
         int screenWidth = toUnsigned(buffer.getShort());
         int screenHeight = toUnsigned(buffer.getShort());
         return new Position(x, y, screenWidth, screenHeight);

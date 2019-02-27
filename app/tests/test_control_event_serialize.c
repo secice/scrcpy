@@ -1,9 +1,9 @@
 #include <assert.h>
 #include <string.h>
 
-#include "controlevent.h"
+#include "control_event.h"
 
-static void test_serialize_keycode_event() {
+static void test_serialize_keycode_event(void) {
     struct control_event event = {
         .type = CONTROL_EVENT_TYPE_KEYCODE,
         .keycode_event = {
@@ -26,7 +26,7 @@ static void test_serialize_keycode_event() {
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
-static void test_serialize_text_event() {
+static void test_serialize_text_event(void) {
     struct control_event event = {
         .type = CONTROL_EVENT_TYPE_TEXT,
         .text_event = {
@@ -46,7 +46,7 @@ static void test_serialize_text_event() {
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
-static void test_serialize_long_text_event() {
+static void test_serialize_long_text_event(void) {
     struct control_event event;
     event.type = CONTROL_EVENT_TYPE_TEXT;
     char text[TEXT_MAX_LENGTH];
@@ -66,7 +66,7 @@ static void test_serialize_long_text_event() {
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
-static void test_serialize_mouse_event() {
+static void test_serialize_mouse_event(void) {
     struct control_event event = {
         .type = CONTROL_EVENT_TYPE_MOUSE,
         .mouse_event = {
@@ -87,19 +87,19 @@ static void test_serialize_mouse_event() {
 
     unsigned char buf[SERIALIZED_EVENT_MAX_SIZE];
     int size = control_event_serialize(&event, buf);
-    assert(size == 14);
+    assert(size == 18);
 
     const unsigned char expected[] = {
         0x02, // CONTROL_EVENT_TYPE_MOUSE
         0x00, // AKEY_EVENT_ACTION_DOWN
         0x00, 0x00, 0x00, 0x01, // AMOTION_EVENT_BUTTON_PRIMARY
-        0x01, 0x04, 0x04, 0x02, // 260 1026
+        0x00, 0x00, 0x01, 0x04, 0x00, 0x00, 0x04, 0x02, // 260 1026
         0x04, 0x38, 0x07, 0x80, // 1080 1920
     };
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
-static void test_serialize_scroll_event() {
+static void test_serialize_scroll_event(void) {
     struct control_event event = {
         .type = CONTROL_EVENT_TYPE_SCROLL,
         .scroll_event = {
@@ -120,11 +120,11 @@ static void test_serialize_scroll_event() {
 
     unsigned char buf[SERIALIZED_EVENT_MAX_SIZE];
     int size = control_event_serialize(&event, buf);
-    assert(size == 17);
+    assert(size == 21);
 
     const unsigned char expected[] = {
         0x03, // CONTROL_EVENT_TYPE_SCROLL
-        0x01, 0x04, 0x04, 0x02, // 260 1026
+        0x00, 0x00, 0x01, 0x04, 0x00, 0x00, 0x04, 0x02, // 260 1026
         0x04, 0x38, 0x07, 0x80, // 1080 1920
         0x00, 0x00, 0x00, 0x01, // 1
         0xFF, 0xFF, 0xFF, 0xFF, // -1
@@ -132,11 +132,10 @@ static void test_serialize_scroll_event() {
     assert(!memcmp(buf, expected, sizeof(expected)));
 }
 
-int main() {
+int main(void) {
     test_serialize_keycode_event();
     test_serialize_text_event();
     test_serialize_long_text_event();
     test_serialize_mouse_event();
     test_serialize_scroll_event();
-    return 0;
 }

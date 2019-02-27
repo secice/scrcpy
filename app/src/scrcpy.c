@@ -13,23 +13,25 @@
 #include "decoder.h"
 #include "device.h"
 #include "events.h"
+#include "file_handler.h"
 #include "frames.h"
-#include "fpscounter.h"
-#include "inputmanager.h"
+#include "fps_counter.h"
+#include "input_manager.h"
 #include "log.h"
-#include "lockutil.h"
+#include "lock_util.h"
 #include "net.h"
+#include "recorder.h"
 #include "screen.h"
 #include "server.h"
-#include "tinyxpm.h"
-#include "installer.h"
+#include "tiny_xpm.h"
 
 static struct server server = SERVER_INITIALIZER;
 static struct screen screen = SCREEN_INITIALIZER;
 static struct frames frames;
 static struct decoder decoder;
 static struct controller controller;
-static struct installer installer;
+static struct file_handler file_handler;
+static struct recorder recorder;
 
 static struct input_manager input_manager = {
     .controller = &controller,
@@ -55,6 +57,11 @@ static int event_watcher(void *data, SDL_Event *event) {
     return 0;
 }
 #endif
+
+static SDL_bool is_apk(const char *file) {
+    const char *ext = strrchr(file, '.');
+    return ext && !strcmp(ext, ".apk");
+}
 
 static SDL_bool event_loop(void) {
 #ifdef CONTINUOUS_RESIZING_WORKAROUND
@@ -104,9 +111,16 @@ static SDL_bool event_loop(void) {
             case SDL_MOUSEBUTTONUP:
                 input_manager_process_mouse_button(&input_manager, &event.button);
                 break;
-            case SDL_DROPFILE:
-                installer_install_apk(&installer, event.drop.file);
+            case SDL_DROPFILE: {
+                file_handler_action_t action;
+                if (is_apk(event.drop.file)) {
+                    action = ACTION_INSTALL_APK;
+                } else {
+                    action = ACTION_PUSH_FILE;
+                }
+                file_handler_request(&file_handler, action, event.drop.file);
                 break;
+            }
         }
     }
     return SDL_FALSE;
@@ -125,9 +139,45 @@ static void wait_show_touches(process_t process) {
     process_check_success(process, "show_touches");
 }
 
+static SDL_LogPriority sdl_priority_from_av_level(int level) {
+    switch (level) {
+        case AV_LOG_PANIC:
+        case AV_LOG_FATAL:
+            return SDL_LOG_PRIORITY_CRITICAL;
+        case AV_LOG_ERROR:
+            return SDL_LOG_PRIORITY_ERROR;
+        case AV_LOG_WARNING:
+            return SDL_LOG_PRIORITY_WARN;
+        case AV_LOG_INFO:
+            return SDL_LOG_PRIORITY_INFO;
+    }
+    // do not forward others, which are too verbose
+    return 0;
+}
+
+static void
+av_log_callback(void *avcl, int level, const char *fmt, va_list vl) {
+    SDL_LogPriority priority = sdl_priority_from_av_level(level);
+    if (priority == 0) {
+        return;
+    }
+    char *local_fmt = SDL_malloc(strlen(fmt) + 10);
+    if (!local_fmt) {
+        LOGC("Cannot allocate string");
+        return;
+    }
+    // strcpy is safe here, the destination is large enough
+    strcpy(local_fmt, "[FFmpeg] ");
+    strcpy(local_fmt + 9, fmt);
+    SDL_LogMessageV(SDL_LOG_CATEGORY_VIDEO, priority, local_fmt, vl);
+    SDL_free(local_fmt);
+}
+
 SDL_bool scrcpy(const struct scrcpy_options *options) {
+    SDL_bool send_frame_meta = !!options->record_filename;
     if (!server_start(&server, options->serial, options->port,
-                      options->max_size, options->bit_rate, options->crop)) {
+                      options->max_size, options->bit_rate, options->crop,
+                      send_frame_meta)) {
         return SDL_FALSE;
     }
 
@@ -140,10 +190,6 @@ SDL_bool scrcpy(const struct scrcpy_options *options) {
     }
 
     SDL_bool ret = SDL_TRUE;
-
-    if (!SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1")) {
-        LOGW("Cannot request to keep default signal handlers");
-    }
 
     if (!sdl_init_and_configure()) {
         ret = SDL_FALSE;
@@ -175,20 +221,35 @@ SDL_bool scrcpy(const struct scrcpy_options *options) {
         goto finally_destroy_server;
     }
 
-    if (!installer_init(&installer, server.serial)) {
+    if (!file_handler_init(&file_handler, server.serial)) {
         ret = SDL_FALSE;
         server_stop(&server);
         goto finally_destroy_frames;
     }
 
-    decoder_init(&decoder, &frames, device_socket);
+    struct recorder *rec = NULL;
+    if (options->record_filename) {
+        if (!recorder_init(&recorder,
+                           options->record_filename,
+                           options->record_format,
+                           frame_size)) {
+            ret = SDL_FALSE;
+            server_stop(&server);
+            goto finally_destroy_file_handler;
+        }
+        rec = &recorder;
+    }
+
+    av_log_set_callback(av_log_callback);
+
+    decoder_init(&decoder, &frames, device_socket, rec);
 
     // now we consumed the header values, the socket receives the video stream
     // start the decoder
     if (!decoder_start(&decoder)) {
         ret = SDL_FALSE;
         server_stop(&server);
-        goto finally_destroy_installer;
+        goto finally_destroy_recorder;
     }
 
     if (!controller_init(&controller, device_socket)) {
@@ -201,7 +262,7 @@ SDL_bool scrcpy(const struct scrcpy_options *options) {
         goto finally_destroy_controller;
     }
 
-    if (!screen_init_rendering(&screen, device_name, frame_size)) {
+    if (!screen_init_rendering(&screen, device_name, frame_size, options->always_on_top)) {
         ret = SDL_FALSE;
         goto finally_stop_and_join_controller;
     }
@@ -209,6 +270,10 @@ SDL_bool scrcpy(const struct scrcpy_options *options) {
     if (options->show_touches) {
         wait_show_touches(proc_show_touches);
         show_touches_waited = SDL_TRUE;
+    }
+
+    if (options->fullscreen) {
+        screen_switch_fullscreen(&screen);
     }
 
     ret = event_loop();
@@ -226,10 +291,14 @@ finally_stop_decoder:
     // stop the server before decoder_join() to wake up the decoder
     server_stop(&server);
     decoder_join(&decoder);
-finally_destroy_installer:
-    installer_stop(&installer);
-    installer_join(&installer);
-    installer_destroy(&installer);
+finally_destroy_file_handler:
+    file_handler_stop(&file_handler);
+    file_handler_join(&file_handler);
+    file_handler_destroy(&file_handler);
+finally_destroy_recorder:
+    if (options->record_filename) {
+        recorder_destroy(&recorder);
+    }
 finally_destroy_frames:
     frames_destroy(&frames);
 finally_destroy_server:

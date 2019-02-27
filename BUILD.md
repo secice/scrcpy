@@ -43,13 +43,22 @@ Install the required packages from your package manager.
 sudo apt install ffmpeg libsdl2-2.0.0
 
 # client build dependencies
-sudo apt install make gcc pkg-config meson \
+sudo apt install make gcc pkg-config meson ninja-build \
                  libavcodec-dev libavformat-dev libavutil-dev \
                  libsdl2-dev
 
 # server build dependencies
 sudo apt install openjdk-8-jdk
 ```
+
+On old versions (like Ubuntu 16.04), `meson` is too old. In that case, install
+it from `pip3`:
+
+```bash
+sudo apt install python3-pip
+pip3 install meson
+```
+
 
 #### Fedora
 
@@ -190,6 +199,12 @@ cd x
 ninja
 ```
 
+_Note: `ninja` [must][ninja-user] be run as a non-root user (only `ninja
+install` must be run as root)._
+
+[ninja-user]: https://github.com/Genymobile/scrcpy/commit/4c49b27e9f6be02b8e63b508b60535426bd0291a
+
+
 ### Run
 
 To run without installing:
@@ -219,10 +234,10 @@ You can then [run](README.md#run) _scrcpy_.
 
 ## Prebuilt server
 
- - [`scrcpy-server-v1.3.jar`][direct-scrcpy-server].  
-   _(SHA-256: 0f9a5a217f33f0ed7a1498ceb3c0cccf31c53533893aa952e674c1571d2740c1)_
+ - [`scrcpy-server-v1.7.jar`][direct-scrcpy-server]  
+   _(SHA-256: ee86ec8424f7dc50cacdf927312bdb46e0aa0d68611da584dc4b16d8057bc25e)_
 
-[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v1.3/scrcpy-server-v1.3.jar
+[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v1.7/scrcpy-server-v1.7.jar
 
 Download the prebuilt server somewhere, and specify its path during the Meson
 configuration:

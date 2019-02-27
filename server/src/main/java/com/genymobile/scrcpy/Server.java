@@ -2,9 +2,13 @@ package com.genymobile.scrcpy;
 
 import android.graphics.Rect;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 
 public final class Server {
+
+    private static final String SERVER_PATH = "/data/local/tmp/scrcpy-server.jar";
 
     private Server() {
         // not instantiable
@@ -14,14 +18,14 @@ public final class Server {
         final Device device = new Device(options);
         boolean tunnelForward = options.isTunnelForward();
         try (DesktopConnection connection = DesktopConnection.open(device, tunnelForward)) {
-            ScreenEncoder screenEncoder = new ScreenEncoder(options.getBitRate());
+            ScreenEncoder screenEncoder = new ScreenEncoder(options.getSendFrameMeta(), options.getBitRate());
 
             // asynchronous
             startEventController(device, connection);
 
             try {
                 // synchronous
-                screenEncoder.streamScreen(device, connection.getOutputStream());
+                screenEncoder.streamScreen(device, connection.getFd());
             } catch (IOException e) {
                 // this is expected on close
                 Ln.d("Screen streaming stopped");
@@ -45,37 +49,32 @@ public final class Server {
 
     @SuppressWarnings("checkstyle:MagicNumber")
     private static Options createOptions(String... args) {
+        if (args.length != 5)
+            throw new IllegalArgumentException("Expecting 5 parameters");
+
         Options options = new Options();
-        if (args.length < 1) {
-            return options;
-        }
+
         int maxSize = Integer.parseInt(args[0]) & ~7; // multiple of 8
         options.setMaxSize(maxSize);
 
-        if (args.length < 2) {
-            return options;
-        }
         int bitRate = Integer.parseInt(args[1]);
         options.setBitRate(bitRate);
 
-        if (args.length < 3) {
-            return options;
-        }
         // use "adb forward" instead of "adb tunnel"? (so the server must listen)
         boolean tunnelForward = Boolean.parseBoolean(args[2]);
         options.setTunnelForward(tunnelForward);
 
-        if (args.length < 4) {
-            return options;
-        }
         Rect crop = parseCrop(args[3]);
         options.setCrop(crop);
+
+        boolean sendFrameMeta = Boolean.parseBoolean(args[4]);
+        options.setSendFrameMeta(sendFrameMeta);
 
         return options;
     }
 
     private static Rect parseCrop(String crop) {
-        if (crop.isEmpty()) {
+        if ("-".equals(crop)) {
             return null;
         }
         // input format: "width:height:x:y"
@@ -90,6 +89,14 @@ public final class Server {
         return new Rect(x, y, x + width, y + height);
     }
 
+    private static void unlinkSelf() {
+        try {
+            new File(SERVER_PATH).delete();
+        } catch (Exception e) {
+            Ln.e("Cannot unlink server", e);
+        }
+    }
+
     public static void main(String... args) throws Exception {
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override
@@ -98,6 +105,7 @@ public final class Server {
             }
         });
 
+        unlinkSelf();
         Options options = createOptions(args);
         scrcpy(options);
     }
